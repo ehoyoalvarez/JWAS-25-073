@@ -1,0 +1,240 @@
+---
+title: "Cardiac activity cessation  during slaughtering combinations in farmed European seabass"
+author: "E. Hoyo-Alvarez, M.L. Cabrera-Álvarez, R. Ginés, A. Roque, P. Arechavala-Lopez"
+date: "2025-07-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+# Load necessary libraries
+library(readxl)
+library(dplyr)
+library(car)         # For ANOVA
+library(agricolae)   # For Tukey HSD post-hoc
+library(multcomp)    # For glht multiple comparisons
+library(lme4)        # For linear mixed-effects model
+library(lmerTest)    # p-values for lmer
+library(emmeans)     # estimated marginal means
+```
+
+# 0. DESCRIPTION OF DATASETS AND DATA PREPARATION
+
+## Data availability
+
+The datasets used in this analysis are not publicly available, but can be made available upon reasonable request to the corresponding author.
+
+## Description of the "df" dataset for time to cardiac cessation analysis (Sections 2.1-2.4)
+
+The dataset (df) represents individual fish subjected to different stunning and slaughtering treatments. The variables included are:
+
+- Treatment: Factor with 9 levels indicating the specific combination of stunning and slaughtering methods applied to each fish
+
+- Stunning: Factor with 3 levels (“el”, “ice”, “no”) denoting the stunning method used (electrical, ice, or no stunning).
+
+- Slaughtering: Factor with 3 levels (“an”, “ice”, “iki”) specifying the slaughtering technique: anesthesia, ice slurry, or ikejime.
+
+- ID: Numeric identifier for each fish.
+
+- Datapointsfromslau: Numeric variable representing the number of heart rate data points recorded after the start of slaughter.
+
+- Timefromslau: Numeric count variable indicating time in minutes from the onset of slaughter until the cessation of cardiac activity (primary response variable).
+
+This dataset was used to fit generalized linear models (GLMs) assessing differences in time to cardiac cessation between treatments.
+
+## Description of the "df2" dataset for the evaluation of heart rate stabilization in pre-slaughtering ice immersion condition
+
+The second dataset (df2) contains 3 variables, representing measurements of heart rate (HR) over time for individual fish subjected to pre-slaughter ice immersion. The variables are:
+
+- Stunning_time: Numeric variable indicating time in minutes elapsed since the onset of ice stunning, recorded in 0.5-minute intervals.
+
+- ID: Categorical variable corresponding to a specific fish individual (identified by ID number).
+
+- HR: Heart rate in bpm at each corresponding time interval.  Missing values (NA) reflect time points where data were not available for the individual.
+
+
+```{r}
+# Attempt to load data if available
+if (file.exists("data/df.csv")) {
+  df <- read.csv("data/df.csv")
+  
+  # Convert key columns to factors
+  df$stunning <- as.factor(df$stunning)
+  df$slaughtering <- as.factor(df$slaughtering)
+  df$treatment <- as.factor(df$treatment)
+  
+  # Check data structure
+  str(df)
+} else {
+  stop("Data file 'data/df.csv' not found. Please place your data in the 'data/' folder to run the analysis.")
+}
+```
+
+# 1. STATISTICAL RATIONALE
+
+Time to cardiac cessation was measured in discrete minutes recorded by biologgers, typically every 0.5-2 min, resulting in count-like data. Therefore, a Poisson distribution is appropriate for modeling time-to-event as it can handle skewed distributions and integer outcomes; in cases where overdispersion was detected, a quasi-Poisson model was applied to account for the extra-Poisson variation.
+Given limited sample sizes (N = 4-5 individuals per group), modeling each pre-slaughtering method separately avoids the risk of overfitting from complex interaction terms, while maintaining statistical power to detect within-stunning treatment differences.
+Multiple comparisons correction was performed using Tukey HSD tests, which control Type I error across pairwise contrasts.
+Additionally, since the time-to-cardiac-cessation dataset contains only a single observation per individual (the time at which cardiac activity ceased), there are no repeated measurements within individuals to model. Therefore, random effects were not included in the GLMs as they are unnecessary to capture individual variability in this context. In contrast, for analyses involving repeated measurements (such as heart rate stabilization over time), mixed-effects models with random intercepts for individual ID were used to properly account for within-subject correlation.
+
+# 2. STATISTICAL MODELLING
+
+## 2.1 GLM for no stunning condition
+
+```{r}
+# Subset data for fish without stunning
+df_no <- df %>% filter(stunning == "no")
+
+# Fit Poisson GLM with treatment as fixed effect
+glm_no <- glm(timefromslau ~ treatment, data = df_no, family = poisson)
+
+# Summarize model
+summary(glm_no)
+
+# Test overall treatment effect with ANOVA
+Anova(glm_no)
+
+# Check residuals and dispersion
+par(mfrow = c(2,2))
+plot(glm_no)
+dispersion <- sum(resid(glm_no, type="pearson")^2) / df.residual(glm_no)
+print(dispersion)
+
+# Fit Quasi-poisson GLM with treatment as fixed effect
+glm_no <- glm(timefromslau ~ treatment, data = df_no, family = quasipoisson)
+
+# Summarize model
+summary(glm_no)
+
+# Test overall treatment effect with ANOVA
+Anova(glm_no)
+
+# Perform Tukey HSD post-hoc to evaluate differences between treatments
+print(HSD.test(glm_no, "treatment", console = TRUE))
+
+```
+
+**Justification**: This model isolates differences between slaughter methods for unstunned fish. Residual checks confirm model validity; Tukey HSD corrects for multiple comparisons.
+
+## 2.2 GLM for Ice immersion pre-slaughter condition
+
+```{r}
+# Subset data for ice stunning
+df_ice <- df %>% filter(stunning == "ice")
+
+# Fit Poisson GLM
+glm_ice <- glm(timefromslau ~ treatment, data = df_ice, family = poisson)
+
+# Summarize model
+summary(glm_ice)
+
+# Test treatment effect
+Anova(glm_ice)
+
+# Check residuals and dispersion
+par(mfrow = c(2,2))
+plot(glm_ice)
+dispersion <- sum(resid(glm_ice, type="pearson")^2) / df.residual(glm_ice)
+print(dispersion)
+
+# Fit a quasi-Poisson GLM
+glm_ice <- glm(timefromslau ~ treatment, data = df_ice, family = quasipoisson)
+
+# Summarize model
+summary(glm_ice)
+
+# Test treatment effect
+Anova(glm_ice)
+
+# Tukey HSD post-hoc
+HSD.test(glm_ice, "treatment", console = TRUE)
+```
+
+**Justification**: Evaluates differences within the ice pre-slaughtering condition. Separate modeling allows clear interpretation for each stunning type.
+
+## 2.3 GLM for Electrical stunning condition
+```{r}
+# Subset data for electrical stunning
+df_el <- df %>% filter(stunning == "el")
+
+# Fit Poisson GLM
+glm_el <- glm(timefromslau ~ treatment, data = df_el, family = poisson)
+
+# Summarize model
+summary(glm_el)
+
+# Test treatment effect
+Anova(glm_el)
+
+# Check residuals and dispersion
+par(mfrow = c(2,2))
+plot(glm_el)
+dispersion <- sum(resid(glm_el, type="pearson")^2) / df.residual(glm_el)
+print(dispersion)
+
+# Fit quasi-Poisson GLM
+glm_el <- glm(timefromslau ~ treatment, data = df_el, family = quasipoisson)
+
+# Summarize model
+summary(glm_el)
+
+# Test treatment effect
+Anova(glm_el)
+
+# Tukey HSD post-hoc
+HSD.test(glm_el, "treatment", console = TRUE)
+```
+
+**Justification**: By focusing only on electrically stunned fish, this model tests how slaughtering methods affect time to cardiac activity cessation in this condition
+
+## 2.4 GLM for Overall treatment differences
+
+```{r}
+# Fit GLM on entire dataset across all stunning and slaughtering combinations
+glm_all <- glm(timefromslau ~ treatment, data = df, family = poisson)
+
+# Summarize model
+summary(glm_all)
+
+# Test treatment effect
+Anova(glm_all)
+
+# Check residuals
+par(mfrow = c(2,2))
+plot(glm_all)
+
+# Multiple comparisons using both HSD.test and glht
+HSD.test(glm_all, "treatment", console = TRUE)
+posthoc <- glht(glm_all, linfct = mcp(treatment = "Tukey"))
+summary(posthoc)
+```
+
+**Justification**: This comprehensive model examines global differences between all combinations of stunning and slaughtering methods, giving an overall view of effects on time to cardiac cessation.
+
+## 2.5 Assessing Heart rate stabilization in pre-slaughtering ice immersion condition
+
+
+```{r}
+# Load HR curve dataset
+if (file.exists("data/df2.csv")) {
+  df2 <- read.csv("data/df2.csv")
+} else {
+  stop("Data file 'data/df2.csv' not found. Please place your data in the 'data/' folder to run the analysis.")
+}
+# Fit linear mixed-effects model
+model <- lmer(HR ~ Stunning_time + (1|ID), data = df2)
+
+# ANOVA on the fixed effect
+anova(model)
+
+# Estimated marginal means and pairwise contrasts
+emm <- emmeans(model, pairwise ~ Stunning_time)
+
+# Compact letter display for multiple comparisons
+cld_res <- cld(emm, alpha = 0.05, Letters = letters, adjust = "tukey")
+cld_res
+```
+
+**Justification**: For the heart rate stabilization analysis, where multiple heart rate measurements were recorded over time for each fish, linear mixed-effects models with random intercepts for individual ID were employed to account for the within-subject correlation arising from repeated measures.
+The fitted linear mixed-effects model accounts for repeated measurements (random intercept by fish ID) and identifies when HR stabilizes after ice immersion. Tukey correction adjusts for multiple time-point comparisons.
